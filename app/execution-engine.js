@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { config } from './config.js';
@@ -36,13 +37,14 @@ function resolveRunner(shell, command, executionKind = 'script', args = []) {
 
 function validatedEnvironment(extra = {}) {
   // Never leak the MCP/OAuth/upstream process environment into an executed
-  // command.  Privileged jobs receive a predictable login-like baseline and
-  // only the additional variables explicitly bound to their approval token.
+  // command. Derive account identity from the OS, not inherited environment
+  // variables or a hardcoded root login, then apply explicitly approved values.
+  const identity = os.userInfo();
   const result = {
     PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-    HOME: '/root',
-    USER: 'root',
-    LOGNAME: 'root',
+    HOME: identity.homedir,
+    USER: identity.username,
+    LOGNAME: identity.username,
     SHELL: '/bin/bash',
     LANG: process.env.LANG || 'C.UTF-8'
   };
