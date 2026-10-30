@@ -1,0 +1,52 @@
+{
+  "name": "serverops-mcp",
+  "version": "1.1.0",
+  "description": "Self-hosted MCP server for secure Linux administration, deployment, monitoring and automation.",
+  "type": "module",
+  "main": "app/main.js",
+  "bin": {
+    "serverops": "./bin/serverops.mjs"
+  },
+  "scripts": {
+    "start": "node app/main.js",
+    "test": "node scripts/test.mjs",
+    "build:css": "tailwindcss -i app/ui/input.css -o app/ui/dist/tailwind.css --minify",
+    "lint": "node scripts/lint.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lowji194/serverops-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "linux",
+    "sysadmin",
+    "server-management",
+    "oauth2",
+    "pkce",
+    "automation",
+    "devops"
+  ],
+  "author": "ServerOps Authors",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/lowji194/serverops-mcp/issues"
+  },
+  "homepage": "https://github.com/lowji194/serverops-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.1.0",
+    "file-type": "^21.0.0",
+    "helmet": "^8.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
