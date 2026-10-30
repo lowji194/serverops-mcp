@@ -63,7 +63,7 @@ try {
   );
   const env = {
     ...inherited,
-    NODE_ENV: 'test',
+    NODE_ENV: 'development',
     HOME: tempDir,
     SERVEROPS_BIND_HOST: '127.0.0.1',
     SERVEROPS_PORT: String(port),
