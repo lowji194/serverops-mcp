@@ -63,8 +63,19 @@ test('privileged engine supports runtimes, stdin, cwd and secret isolation', asy
 });
 
 test('multiline Bash, pipelines, stderr and output truncation are recorded', async () => {
+  const diagnostic = await engine.execute({
+    command: "printf 'diagnostic' >&2",
+    shell: 'bash',
+    cwd: testRoot,
+    timeout_seconds: 5,
+    max_output_bytes: 128
+  }, 'test-operator');
+  assert.equal(diagnostic.status, 'completed');
+  assert.equal(diagnostic.stderr, 'diagnostic');
+  assert.equal(diagnostic.stderr_page.total_bytes, Buffer.byteLength('diagnostic'));
+
   const output = await engine.execute({
-    command: "cat <<'EOF' | tr 'a-z' 'A-Z'\nhello serverops\nEOF\nprintf 'diagnostic' >&2\nprintf '%4096s' '' | tr ' ' x",
+    command: "cat <<'EOF' | tr 'a-z' 'A-Z'\\nhello serverops\\nEOF\\nprintf '%4096s' '' | tr ' ' x",
     shell: 'bash',
     cwd: testRoot,
     timeout_seconds: 5,
@@ -74,7 +85,6 @@ test('multiline Bash, pipelines, stderr and output truncation are recorded', asy
   assert.match(output.stdout, /HELLO SERVEROPS/);
   assert.equal(output.stdout_page.truncated, true);
   assert.equal(output.stdout_page.total_bytes > output.stdout_page.bytes, true);
-  assert.equal(output.stderr_page.total_bytes, Buffer.byteLength('diagnostic'));
 });
 
 test('async jobs can be inspected and their process groups cancelled', async () => {
