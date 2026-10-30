@@ -26,8 +26,8 @@ function resolveRunner(shell, command, executionKind = 'script', args = []) {
     return { executable: command, args };
   }
   const selected = String(shell || 'bash');
-  if (selected === 'bash' || selected === '/bin/bash') return { executable: '/bin/bash', args: ['-lc', command] };
-  if (selected === 'sh' || selected === '/bin/sh') return { executable: '/bin/sh', args: ['-lc', command] };
+  if (selected === 'bash' || selected === '/bin/bash') return { executable: '/bin/bash', args: ['-c', command] };
+  if (selected === 'sh' || selected === '/bin/sh') return { executable: '/bin/sh', args: ['-c', command] };
   if (selected === 'python' || selected === 'python3') return { executable: '/usr/bin/python3', args: ['-c', command] };
   if (selected === 'node') return { executable: process.execPath, args: ['-e', command] };
   if (!path.isAbsolute(selected)) throw new Error('shell_must_be_builtin_or_absolute');
