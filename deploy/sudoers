@@ -1,0 +1,11 @@
+# ServerOps MCP — Least Privilege Sudoers Configuration
+# Install to: /etc/sudoers.d/serverops-mcp
+#
+# When running ServerOps as non-root user 'serverops', this configuration
+# allows controlled execution of specific administrative utilities without
+# exposing an unrestricted root shell.
+
+serverops ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *, /usr/bin/systemctl is-active *, /usr/bin/journalctl *
+
+# Allow service restarts only for explicitly declared services (customize as needed):
+# serverops ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx
