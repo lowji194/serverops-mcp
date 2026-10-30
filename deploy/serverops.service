@@ -1,0 +1,34 @@
+[Unit]
+Description=ServerOps MCP - Secure Linux Administration and Automation
+Documentation=https://github.com/lowji194/serverops-mcp
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/serverops-mcp
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/serverops-mcp/serverops.env
+ExecStart=/usr/bin/node app/main.js
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+# ServerOps exposes explicitly scoped host administration. Keep it behind HTTPS
+# and grant system:admin only to trusted clients.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=no
+ReadWritePaths=/etc /opt /usr/local /var/lib/serverops-mcp /var/log/serverops-mcp
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=false
+RestrictRealtime=true
+LockPersonality=true
+
+LimitNOFILE=65535
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
