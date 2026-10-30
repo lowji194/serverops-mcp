@@ -64,7 +64,7 @@ test('privileged engine supports runtimes, stdin, cwd and secret isolation', asy
 
 test('multiline Bash, pipelines, stderr and output truncation are recorded', async () => {
   const output = await engine.execute({
-    command: "cat <<'EOF' | tr 'a-z' 'A-Z'\nhello serverops\nEOF\nprintf 'diagnostic' >&2\nhead -c 4096 /dev/zero | tr '\\0' x",
+    command: "cat <<'EOF' | tr 'a-z' 'A-Z'\nhello serverops\nEOF\nprintf 'diagnostic' >&2\nyes x | head -c 4096",
     shell: 'bash',
     cwd: testRoot,
     timeout_seconds: 5,
