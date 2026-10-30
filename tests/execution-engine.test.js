@@ -62,6 +62,20 @@ test('privileged engine supports runtimes, stdin, cwd and secret isolation', asy
   assert.equal(executable.stdout, 'direct:argv');
 });
 
+test('command environment uses the service account identity without leaking inherited secrets', async () => {
+  const account = os.userInfo();
+  const result = await engine.execute({
+    command: "printf '%s|%s|%s' \"$HOME\" \"$USER\" \"$LOGNAME\"; test -z \"${SERVEROPS_TEST_SECRET:-}\"",
+    shell: 'bash',
+    cwd: testRoot,
+    timeout_seconds: 5
+  }, 'test-operator');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.stdout, `${account.homedir}|${account.username}|${account.username}`);
+  assert.equal(result.stderr, '');
+});
+
 test('multiline Bash, pipelines, stderr and output truncation are recorded', async () => {
   const diagnostic = await engine.execute({
     command: "printf 'diagnostic' >&2",
