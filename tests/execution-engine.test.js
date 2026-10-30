@@ -75,7 +75,7 @@ test('multiline Bash, pipelines, stderr and output truncation are recorded', asy
   assert.equal(diagnostic.stderr_page.total_bytes, Buffer.byteLength('diagnostic'));
 
   const output = await engine.execute({
-    command: "cat <<'EOF' | tr 'a-z' 'A-Z'\\nhello serverops\\nEOF\\nprintf '%4096s' '' | tr ' ' x",
+    command: "printf 'hello serverops\n' | tr 'a-z' 'A-Z'; printf '%4096s' '' | tr ' ' x",
     shell: 'bash',
     cwd: testRoot,
     timeout_seconds: 5,
