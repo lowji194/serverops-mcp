@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { hasOAuthFullAdmin } from './full-admin.js';
 import { config } from './config.js';
 import { db, now, getOwnerPasswordHash } from './storage.js';
 import { verifyPasswordHash } from './bootstrap.js';
@@ -66,7 +67,7 @@ export function verifyAccessToken(token) {
     if (
       !session ||
       session.revoked_at !== null ||
-      session.expires_at <= t ||
+      (session.expires_at <= t && !hasOAuthFullAdmin(session.client_id, session.subject)) ||
       session.client_id !== p.client_id ||
       session.resource !== p.aud ||
       session.subject !== p.sub ||
@@ -301,7 +302,7 @@ export function refreshTokens({ refreshToken, clientId, resource = RESOURCE, sco
   const effectiveResource = resource || RESOURCE;
   const tokenHash = hash(refreshToken);
   const row = db.prepare('SELECT * FROM oauth_refresh_tokens WHERE token_hash=?').get(tokenHash);
-  if (!row || row.revoked_at || row.expires_at < now() || row.client_id !== clientId || row.resource !== effectiveResource) {
+  if (!row || row.revoked_at || (row.expires_at < now() && !hasOAuthFullAdmin(row.client_id, row.subject)) || row.client_id !== clientId || row.resource !== effectiveResource) {
     throw new Error('invalid_grant');
   }
   const original = row.scopes.split(' ');

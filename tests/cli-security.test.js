@@ -29,6 +29,8 @@ test('privileged CLI commands require an interactive local terminal and ignore a
     ['claim', 'activation-token-argv-marker', '--password', 'password-argv-marker'],
     ['reset-password', 'password-argv-marker'],
     ['bootstrap'],
+    ['full-admin','create','test-label','/tmp/unused-admin-token'],
+    ['full-admin','oauth-grant','client-id-argv-marker'],
     ['rotate-signing-key'],
     ['revoke-all-tokens'],
     ['token', 'revoke-all'],

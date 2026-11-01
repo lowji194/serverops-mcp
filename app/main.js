@@ -12,6 +12,8 @@ import { requireMcpAuth } from './auth.js';
 import * as store from './storage.js';
 import * as oauth from './oauth.js';
 import * as admin from './admin.js';
+import { hasFullAdmin } from './full-admin.js';
+import { registerLegacySystemCompat } from './legacy-system-compat.js';
 import * as projects from './project-manager.js';
 import { executionEngine, canonicalExecutionApproval } from './execution-engine.js';
 import { runNetwork, networkNeedsApproval, canonicalNetworkApproval } from './network-engine.js';
@@ -20,7 +22,7 @@ import { classifyToolError, systemMetrics } from './diagnostics.js';
 import { renderAuthorizePage, escapeHtml } from './ui/authorize-template.js';
 import { claimServer, initializeBootstrapToken } from './bootstrap.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '2.2.0';
 
 ensureDataDirs();
 
@@ -160,8 +162,8 @@ const execRunInputSchema = {
   timeout_seconds: z.number().int().min(1).max(config.executionMaxTimeoutSeconds).default(30),
   max_output_bytes: z.number().int().min(1024).max(config.executionMaxOutputBytes).default(config.executionMaxOutputBytes),
   execution_mode: z.enum(['sync', 'async']).default('sync'),
-  approval_token: z.string().min(20),
-  confirmation: z.literal('ROOT_ACTION_APPROVED')
+  approval_token: z.string().min(20).optional(),
+  confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
 };
 
 const networkInputSchema = {
@@ -202,9 +204,11 @@ const networkInputSchema = {
 function buildServer(authInfo) {
   const server = new McpServer({ name: 'ServerOps MCP', version: APP_VERSION });
   const toolPermissionMatrix = [];
+  const registeredTools = new Map();
   const nativeRegisterTool = server.registerTool.bind(server);
 
   server.registerTool = (name, definition, handler) => {
+    registeredTools.set(name, { definition, handler });
     toolPermissionMatrix.push({
       tool: name,
       required_oauth_scopes: definition?._meta?.securitySchemes?.flatMap(scheme => scheme.scopes || []) || [],
@@ -227,6 +231,7 @@ function buildServer(authInfo) {
     service: 'ServerOps MCP',
     server_id: 'serverops-mcp',
     version: APP_VERSION,
+    authorization: { full_admin: hasFullAdmin(activeAuth(authInfo)), per_action_approval_required: !hasFullAdmin(activeAuth(authInfo)) },
     execution: executionEngine.inspect(),
     metrics: systemMetrics()
   })));
@@ -362,13 +367,13 @@ function buildServer(authInfo) {
 
   server.registerTool('root_write', {
     title: 'Atomic file write with backup',
-    description: 'Privileged file write with automatic backup. Requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Privileged file write with automatic backup. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: {
       path: z.string().min(1).max(4096),
       content: z.string().max(8388608),
       mode: z.string().regex(/^[0-7]{3,4}$/).optional(),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -378,12 +383,12 @@ function buildServer(authInfo) {
 
   server.registerTool('root_mkdir', {
     title: 'Create directory',
-    description: 'Recursively creates an absolute directory. Requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Recursively creates an absolute directory. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: {
       path: z.string().min(1).max(4096),
       mode: z.string().regex(/^[0-7]{3,4}$/).default('0750'),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -393,12 +398,12 @@ function buildServer(authInfo) {
 
   server.registerTool('root_move', {
     title: 'Move or rename path',
-    description: 'Moves source to destination with backup. Requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Moves source to destination with backup. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: {
       source: z.string().min(1).max(4096),
       destination: z.string().min(1).max(4096),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -408,11 +413,11 @@ function buildServer(authInfo) {
 
   server.registerTool('root_delete', {
     title: 'Safely delete path to backup',
-    description: 'Moves a path to the recoverable backup directory. Requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Moves a path to the recoverable backup directory. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: {
       path: z.string().min(1).max(4096),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -487,8 +492,8 @@ function buildServer(authInfo) {
     inputSchema: {
       service: z.string().regex(/^[A-Za-z0-9@_.:-]{1,200}$/),
       action: z.enum(['start', 'stop', 'restart', 'reload', 'enable', 'disable']),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -529,8 +534,8 @@ function buildServer(authInfo) {
       action: z.enum(['signal']),
       pid: z.number().int().min(2),
       signal: z.enum(['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGINT', 'SIGUSR1', 'SIGUSR2']).default('SIGTERM'),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -545,8 +550,8 @@ function buildServer(authInfo) {
     inputSchema: {
       command: z.string().min(1).max(8192),
       timeout_seconds: z.number().int().min(1).max(300).default(30),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -556,7 +561,7 @@ function buildServer(authInfo) {
 
   server.registerTool('system_execute', {
     title: 'Execute script or executable in isolated execution engine',
-    description: 'Multi-runner execution engine (bash, sh, python3, node, executable) with concurrency, process group control, and secret isolation. Every execution request requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Multi-runner execution engine (bash, sh, python3, node, executable) with concurrency, process group control, and secret isolation. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: execRunInputSchema,
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -589,11 +594,11 @@ function buildServer(authInfo) {
 
   server.registerTool('system_job_cancel', {
     title: 'Cancel execution job',
-    description: 'Terminates the process group of a running job. Requires a one-time grant issued by the VPS owner through the local CLI.',
+    description: 'Terminates the process group of a running job. Full Admin clients execute directly; other clients require a one-time local owner grant.',
     inputSchema: {
       execution_id: z.string().uuid(),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROOT_ACTION_APPROVED')
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROOT_ACTION_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['system:admin']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -721,14 +726,14 @@ function buildServer(authInfo) {
 
   server.registerTool('project_deploy_publish', {
     title: 'Publish staged project changes',
-    description: 'Atomically publishes staged changes to production with an automatic rollback backup. Requires local owner approval for the exact validated change set.',
+    description: 'Atomically publishes staged changes to production with an automatic rollback backup. Full Admin clients publish directly after validation; other clients require exact owner approval.',
     inputSchema: {
       project_id: z.string(),
       validation_id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
       change_set_id: z.string().regex(/^[a-f0-9]{64}$/i),
-      approval_id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('PUBLISH_PROJECT_APPROVED')
+      approval_id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional(),
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('PUBLISH_PROJECT_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['project:publish']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -755,13 +760,13 @@ function buildServer(authInfo) {
 
   server.registerTool('project_rollback', {
     title: 'Rollback project to snapshot',
-    description: 'Restores files to a previous deployment snapshot with a safety backup. Requires local owner approval for the exact snapshot.',
+    description: 'Restores files to a previous deployment snapshot with a safety backup. Full Admin clients restore directly; other clients require exact owner approval.',
     inputSchema: {
       project_id: z.string(),
       backup_id: z.string().min(1),
-      approval_id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
-      approval_token: z.string().min(20),
-      confirmation: z.literal('ROLLBACK_PROJECT_APPROVED')
+      approval_id: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional(),
+      approval_token: z.string().min(20).optional(),
+      confirmation: z.literal('ROLLBACK_PROJECT_APPROVED').optional()
     },
     _meta: { securitySchemes: oauthScheme(['project:rollback']) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
@@ -774,6 +779,8 @@ function buildServer(authInfo) {
     _meta: { securitySchemes: oauthScheme(['project:read']) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, requireToolScope(authInfo, 'project:read', async ({ project_id }) => result(projects.deployStatus(project_id))));
+
+  registerLegacySystemCompat(server, { registeredTools, authInfo, z, result, fail, requireToolScope, oauthScheme });
 
   server.toolScopeMap = Object.fromEntries(toolPermissionMatrix.map(item => [item.tool, item.required_oauth_scopes]));
   return server;

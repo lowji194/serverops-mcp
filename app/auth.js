@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { verifyToken } from './full-admin.js';
 import { config } from './config.js';
 import { SCOPES, verifyAccessToken } from './oauth.js';
 
@@ -11,7 +12,7 @@ export function requireMcpAuth(req, res, next) {
   const token = bearerFrom(req);
 
   try {
-    req.authInfo = verifyAccessToken(token);
+    req.authInfo = token.startsWith('sops_admin_') ? verifyToken(token, SCOPES) : verifyAccessToken(token);
     return next();
   } catch {
     const challenge = `Bearer resource_metadata="${config.oauthIssuer}/.well-known/oauth-protected-resource", scope="${SCOPES.join(' ')}", error="invalid_token", error_description="${token ? 'The access token is invalid or expired' : 'Authentication is required'}"`;

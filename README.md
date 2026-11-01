@@ -16,7 +16,7 @@ ServerOps MCP connects compatible AI clients to a Linux host through the standar
 - Put the service behind HTTPS and a reverse proxy.
 - Prefer a VPN, private network, or IP allowlist; do not expose an unrestricted root-capable MCP endpoint.
 - Grant `system:read` by default. Grant `system:admin` only to clients that genuinely need it.
-- Privileged mutations, command execution, elevated network requests, project publishing, and rollback require a separate local owner approval. The MCP client receives only a pending request ID; the VPS owner reviews it, authenticates with the owner password, and issues the one-time grant from an interactive terminal.
+- By default, privileged mutations, command execution, elevated network requests, project publishing, and rollback require a separate local owner approval. An owner can explicitly authorize a trusted principal for revocable Full Admin to avoid per-action grants. The MCP client receives only a pending request ID; the VPS owner reviews it, authenticates with the owner password, and issues the one-time grant from an interactive terminal.
 - Keep the owner password, OAuth signing key, database, and backups outside the Git repository.
 
 Read [Security & Threat Model](docs/SECURITY.md) before enabling remote administration.
@@ -26,7 +26,8 @@ Read [Security & Threat Model](docs/SECURITY.md) before enabling remote administ
 - **OAuth 2.1 + PKCE S256** with RFC 7591 Dynamic Client Registration for compatible public MCP clients.
 - **Password-only owner authorization** with scrypt password hashing and a local, one-time bootstrap claim.
 - **Scoped access** separating host read operations, root administration, and managed-project permissions.
-- **Out-of-band owner approval** for privileged filesystem, service, process, command, network, job-cancel, publish, and rollback operations. Approval grants are single-use and bound to the exact payload.
+- **Out-of-band owner approval by default** for privileged filesystem, service, process, command, network, job-cancel, publish, and rollback operations. Approval grants are single-use and bound to the exact payload.
+- **Optional Full Admin authorization** through a root-issued permanent bearer credential or an explicit grant for an already authenticated OAuth client. Each operation checks the current authorization; revocation takes effect on subsequent requests.
 - **Root-capable systemd service** with filesystem protections, private temporary storage, resource limits, and restrictive file permissions.
 - **Execution engine** for Bash, Python, Node.js, and absolute executables, with concurrency limits, timeouts, process-group cancellation, bounded output, and a sanitized child environment.
 - **Network engine** with DNS pinning, private-address protection by default, bounded responses, secret-file references, and local owner approval for elevated requests.
@@ -119,7 +120,7 @@ Enter the activation token and choose a strong owner password when prompted. If 
 
 If the token is lost, wait for its 15-minute expiry and run `sudo serverops bootstrap` to issue a replacement. The bootstrap token is only for the initial claim; it is not an MCP bearer token.
 
-### 5. Approve privileged operations locally
+### 5. Authorize privileged operations locally
 
 The MCP client can request an operation but cannot approve it. On the VPS, inspect the queue:
 
@@ -139,7 +140,7 @@ The CLI displays the action and payload preview, prompts for the owner password,
 sudo serverops approvals deny <approval-id>
 ~~~
 
-Approval is available only from a local interactive terminal.
+Approval is available only from a local interactive terminal. Alternatively, explicitly authorize a trusted client for Full Admin as described below.
 
 ### 6. Connect an MCP client
 
@@ -162,12 +163,38 @@ The default requested scope is `system:read`. Review the scopes shown on the aut
 | Scope | Access |
 |---|---|
 | `system:read` | Diagnostics, resource metrics, safe environment keys, and non-sensitive service status |
-| `system:admin` | Arbitrary host filesystem reads, sensitive logs, root-level mutations, service lifecycle, process signals, command execution, elevated network operations, and job cancellation. Mutations require local owner approval. |
+| `system:admin` | Arbitrary host filesystem reads, sensitive logs, root-level mutations, service lifecycle, process signals, command execution, elevated network operations, and job cancellation. Mutations require local owner approval unless the principal has an active explicit Full Admin authorization. |
 | `project:read` | Read configured managed projects and deployment state |
 | `project:edit` | Stage changes inside configured project boundaries |
 | `project:preview` | Diff, shadow validation, and deployment previews |
-| `project:publish` | Request local owner approval to publish a validated project change set |
-| `project:rollback` | Request local owner approval to restore a managed project from a deployment snapshot |
+| `project:publish` | Publish a validated change set with local owner approval or active Full Admin |
+| `project:rollback` | Restore a snapshot with local owner approval or active Full Admin |
+
+## Full Admin for trusted clients
+
+Full Admin is opt-in. A new installation and newly registered OAuth clients do not receive it automatically. The local root CLI can grant it to an exact OAuth client/owner pair only after that client has an active, authenticated `system:admin` refresh session:
+
+```bash
+sudo serverops full-admin oauth-grant <client-id>
+sudo serverops full-admin oauth-list
+sudo serverops full-admin oauth-revoke <client-id>
+```
+
+Granting access requires root, an interactive terminal and the owner password once. The grant has no expiry. The client still needs valid OAuth authentication and the required tool scopes. Access tokens expire after one hour and refresh normally; while the grant remains active, an unrevoked refresh credential can renew beyond its normal expiry. Revoking this grant restores per-action approval checks immediately, including in an existing MCP session. It does not log the client out or stop a running command.
+
+For clients that support a custom Bearer credential, root can instead issue a dedicated non-expiring token:
+
+```bash
+sudo serverops full-admin create trusted-client /var/lib/serverops-mcp/trusted-client.token
+sudo serverops full-admin list
+sudo serverops full-admin revoke <token-id>
+```
+
+Creation requires root, an interactive terminal and the owner password. The output path must be absolute and must not exist. The secret is written once with mode `0600`; CLI output and the database contain only its identifier/hash, not the secret. Send the file content as `Authorization: Bearer <token>` to `/mcp`. Anyone holding it has administrator access until it is revoked. Use a separate token per trusted client. Signing-key rotation and OAuth refresh revocation do not replace explicit Full Admin token revocation.
+
+Full Admin removes ServerOps per-action grants for core filesystem, execution, service, process, network and project publish/rollback tools. It preserves existing validation and operational protections; client-side confirmation policies and separate integration publication policies are unchanged. The MCP API provides no tool to mint a Full Admin credential or grant. See [CLI reference](docs/CLI_REFERENCE.md#full-admin) and [security model](docs/SECURITY.md#full-admin-trust-boundary).
+
+The core-tools table below describes default approval requirements. An active Full Admin authorization satisfies the per-action approval gate.
 
 ## Core tools
 
@@ -197,6 +224,12 @@ The default requested scope is `system:read`. Review the scopes shown on the aut
 | `sudo serverops rotate-signing-key` | Rotate the signing key and revoke refresh tokens |
 | `sudo serverops clients list` | List registered OAuth clients |
 | `sudo serverops clients revoke <client_id>` | Revoke a client and its refresh tokens |
+| `sudo serverops full-admin create <label> <absolute-new-file>` | Issue a non-expiring Full Admin token to a private file |
+| `sudo serverops full-admin list` / `sudo serverops full-admin status` | List Full Admin token IDs and revocation state |
+| `sudo serverops full-admin revoke <token-id>` | Revoke a Full Admin token immediately |
+| `sudo serverops full-admin oauth-grant <client-id>` | Grant persistent Full Admin to an authenticated admin client |
+| `sudo serverops full-admin oauth-list` | List OAuth Full Admin grants |
+| `sudo serverops full-admin oauth-revoke <client-id>` | Restore approval requirements for the client |
 | `sudo serverops approvals list` | List pending privileged operations |
 | `sudo serverops approvals approve <approval-id>` | Locally approve one exact operation and issue a one-time grant |
 | `sudo serverops approvals deny <approval-id>` | Deny a pending operation |
@@ -235,3 +268,5 @@ npm run smoke
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Recovery commands (`reset-password`, signing-key rotation and token revoke-all) also revoke permanent Full Admin credentials and persistent OAuth Full Admin grants. Revoking a single OAuth refresh session leaves the separate Full Admin grant in place, but the revoked session cannot authenticate.

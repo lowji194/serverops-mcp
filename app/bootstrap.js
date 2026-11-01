@@ -1,3 +1,4 @@
+import { revokeAllFullAdmin } from './full-admin.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -107,6 +108,7 @@ export function resetPasswordLocally(newPassword) {
   const timestamp = store.now();
   const tx = store.db.transaction(() => {
     store.setOwnerPasswordHash(newHash);
+    revokeAllFullAdmin();
     const revoked = store.db.prepare('UPDATE oauth_refresh_tokens SET revoked_at=? WHERE revoked_at IS NULL').run(timestamp);
     const codes = store.db.prepare('DELETE FROM oauth_codes').run();
     const grants = store.db.prepare('DELETE FROM grants').run();

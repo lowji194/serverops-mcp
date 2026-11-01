@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import { createToken, listTokens, revokeToken as revokeAdminToken, grantOAuthClient, revokeOAuthClient, listOAuthGrants, revokeAllFullAdmin } from '../app/full-admin.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -106,6 +107,12 @@ Usage:
   serverops <command> [options]
 
 Commands:
+  full-admin create <label> <file>  Issue a non-expiring admin credential to a private file
+  full-admin list                  List admin token IDs without secrets
+  full-admin revoke <id>           Revoke an admin credential immediately
+  full-admin oauth-list            List persistent OAuth Full Admin grants
+  full-admin oauth-grant <client>   Grant an authenticated admin client
+  full-admin oauth-revoke <client>  Restore per-action approvals for a client
   sudo serverops bootstrap  Generate a one-time 256-bit activation token (15m TTL)
   sudo serverops claim      Interactively claim server using the one-time activation token
   sudo serverops reset-password  Privileged local password reset (no previous password needed)
@@ -158,6 +165,7 @@ function rotateSigningKey() {
   }
   const t = store.now();
   const revoked = store.db.prepare('UPDATE oauth_refresh_tokens SET revoked_at=? WHERE revoked_at IS NULL').run(t);
+  revokeAllFullAdmin();
   store.audit('signing_key_rotated', null, 'ok', 'OAuth signing key rotated; active refresh tokens revoked');
   console.log('[Success] OAuth signing key rotated.');
   console.log('[Success] Revoked ' + revoked.changes + ' active refresh tokens.');
@@ -167,6 +175,30 @@ async function main() {
   const [,, cmd, ...args] = process.argv;
 
   switch (cmd) {
+    case 'full-admin': {
+      if (typeof process.getuid !== 'function' || process.getuid() !== 0) throw new Error('Full Admin management requires root.');
+      const [action, value, output] = args;
+      if (action === 'oauth-list') { console.log(JSON.stringify(listOAuthGrants(),null,2)); break; }
+      if (action === 'oauth-grant' || action === 'oauth-revoke') {
+        if (!value) throw new Error('OAuth client ID required');
+        if (action === 'oauth-grant') { assertLocalRootAndTty(); await authenticateLocalOwner(); }
+        console.log(JSON.stringify(action === 'oauth-grant' ? grantOAuthClient(value) : revokeOAuthClient(value)));
+        break;
+      }
+      if (action === 'list' || action === 'status') { console.log(JSON.stringify(listTokens(), null, 2)); break; }
+      if (action === 'revoke') { if (!value) throw new Error('Token ID required'); console.log(JSON.stringify({ revoked: revokeAdminToken(value) })); break; }
+      if (action !== 'create' || !value || !output || !path.isAbsolute(output)) throw new Error('Usage: serverops full-admin create <label> <absolute-private-output-file> | list | revoke <id>');
+      assertLocalRootAndTty();
+      await authenticateLocalOwner();
+      const fd = fs.openSync(output, 'wx', 0o600);
+      let issued;
+      try { issued = createToken(value); fs.writeFileSync(fd, issued.token + '\n'); }
+      catch (error) { if (issued) revokeAdminToken(issued.id); throw error; }
+      finally { fs.closeSync(fd); }
+      console.log(JSON.stringify({ id: issued.id, expires_at: null, token_file: output }));
+      break;
+    }
+
     case 'bootstrap':
     case 'init': {
       assertLocalRootAndTty();
@@ -233,6 +265,7 @@ async function main() {
       await confirmOwnerAction('REVOKE ALL TOKENS', 'Revoke every active OAuth refresh session?');
       const t = store.now();
       const updated = store.db.prepare('UPDATE oauth_refresh_tokens SET revoked_at=? WHERE revoked_at IS NULL').run(t);
+      revokeAllFullAdmin();
       store.audit('tokens_revoked_all', null, 'ok', 'Revoked ' + updated.changes + ' refresh tokens');
       console.log('[Success] Revoked ' + updated.changes + ' active refresh tokens.');
       break;
@@ -313,6 +346,7 @@ async function main() {
       } else if (action === 'revoke-all') {
         await confirmOwnerAction('REVOKE ALL TOKENS', 'Revoke every active OAuth refresh session?');
         const updated = store.db.prepare('UPDATE oauth_refresh_tokens SET revoked_at=? WHERE revoked_at IS NULL').run(store.now());
+        revokeAllFullAdmin();
         store.audit('tokens_revoked_all', null, 'ok', 'Revoked ' + updated.changes + ' refresh tokens');
         console.log('[Success] Revoked ' + updated.changes + ' active refresh tokens.');
       } else if (action === 'rotate') {
@@ -341,13 +375,15 @@ async function main() {
         const clientId = String(args[1] || '');
         if (!clientId || clientId.length > 1024) throw new Error('Provide a valid client ID.');
         const exists = store.db.prepare('SELECT client_id FROM oauth_clients WHERE client_id=?').get(clientId);
-        if (!exists) throw new Error('OAuth client not found.');
+        const authenticated = store.db.prepare('SELECT 1 FROM oauth_refresh_tokens WHERE client_id=? LIMIT 1').get(clientId);
+        if (!exists && !authenticated) throw new Error('OAuth client not found.');
         await confirmOwnerAction('REVOKE CLIENT ' + clientId.slice(0, 8), 'Remove this OAuth client and revoke all its refresh sessions?');
         const t = store.now();
         const tx = store.db.transaction(() => {
           const revoked = store.db.prepare('UPDATE oauth_refresh_tokens SET revoked_at=? WHERE client_id=? AND revoked_at IS NULL').run(t, clientId);
           store.db.prepare('DELETE FROM oauth_codes WHERE client_id=?').run(clientId);
           store.db.prepare('DELETE FROM oauth_clients WHERE client_id=?').run(clientId);
+          revokeOAuthClient(clientId);
           return revoked.changes;
         });
         const count = tx();

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { authorizeFullAdmin, hasFullAdmin } from './full-admin.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -510,6 +511,7 @@ export function deployApprovalPrepare(projectId, validationId, changeSetId, acto
   return prepareApproval(projectId, 'publish', validationId + ':' + changeSetId, review, actor);
 }
 function consumeApproval(projectId, approvalId, token, action, binding) {
+  if (authorizeFullAdmin('project_' + action, { projectId, binding })) return;
   const grantAction = 'project_' + action;
   const approvalPayload = { project_id: projectId, binding };
   const expectedHash = sha256(JSON.stringify({ action: grantAction, payload: approvalPayload }));
@@ -586,7 +588,7 @@ function healthCheck(p) {
 }
 export function deployPublish(projectId, validationId, changeSetId, approvalId, approvalToken, confirmation) {
   return operationResult(() => {
-    const p = project(projectId, 'publish'); if (confirmation !== 'PUBLISH_PROJECT_APPROVED') throw error('PROJECT_APPROVAL_CONFIRMATION_REQUIRED', 'Explicit publish confirmation is required.');
+    const p = project(projectId, 'publish'); if (!hasFullAdmin() && confirmation !== 'PUBLISH_PROJECT_APPROVED') throw error('PROJECT_APPROVAL_CONFIRMATION_REQUIRED', 'Explicit publish confirmation is required.');
     const state = readState(p); const set = changeSet(p, state); const binding = `${validationId}:${changeSetId}`;
     if (!state.validation?.passed || state.validation.id !== validationId || set.change_set_id !== changeSetId || state.validation.change_set_id !== changeSetId) throw error('PROJECT_VERSION_CONFLICT', 'Validation or diff no longer matches staged changes.');
     consumeApproval(p.id, approvalId, approvalToken, 'publish', binding); const deploymentId = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${changeSetId.slice(0, 12)}`; const backup = backupChanges(p, state, deploymentId); const written = [];
@@ -626,7 +628,7 @@ export function rollbackApprovalPrepare(projectId, backupId, actor = 'unknown') 
 }
 export function rollback(projectId, backupId, approvalId, approvalToken, confirmation) {
   return operationResult(() => {
-    const p = project(projectId, 'rollback'); if (confirmation !== 'ROLLBACK_PROJECT_APPROVED') throw error('PROJECT_APPROVAL_CONFIRMATION_REQUIRED', 'Explicit rollback confirmation is required.');
+    const p = project(projectId, 'rollback'); if (!hasFullAdmin() && confirmation !== 'ROLLBACK_PROJECT_APPROVED') throw error('PROJECT_APPROVAL_CONFIRMATION_REQUIRED', 'Explicit rollback confirmation is required.');
     const state = readState(p); consumeApproval(p.id, approvalId, approvalToken, 'rollback', backupId);
     const backup = `${path.join(config.backupDir, "deploy", p.id, backupId)}`; const manifestFile = path.join(backup, 'manifest.json'); if (!fs.existsSync(manifestFile) || !fs.statSync(manifestFile).isFile()) throw error('PROJECT_BACKUP_NOT_FOUND', 'Backup manifest not found.');
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')); const safetyId = `pre-rollback-${Date.now()}`; backupChanges(p, { changes: Object.fromEntries(manifest.files.map(f => [f.relative_path, {}])) }, safetyId);
