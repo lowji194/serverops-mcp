@@ -39,7 +39,7 @@ test('permanent token supports MCP mutations, audit, immediate session revocatio
     const write = await client.callTool({name:'root_write', arguments:{path:file,content:'permanent admin'}});
     assert.ok(!write.isError, JSON.stringify(write));
     assert.equal(fs.readFileSync(file,'utf8'), 'permanent admin');
-    const command = await client.callTool({name:'system_execute',arguments:{command:'printf full-admin-ok', max_output_bytes:4096}});
+    const command = await client.callTool({name:'system_execute',arguments:{command:'printf full-admin-ok', cwd:dir, max_output_bytes:4096}});
     assert.ok(!command.isError, JSON.stringify(command));
     assert.ok(JSON.stringify(command).includes('full-admin-ok'));
     const audits = store.db.prepare("SELECT detail FROM audit WHERE action='full_admin_operation_authorized'").all();
