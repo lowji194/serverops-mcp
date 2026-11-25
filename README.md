@@ -270,3 +270,13 @@ npm run smoke
 MIT. See [LICENSE](LICENSE).
 
 Recovery commands (`reset-password`, signing-key rotation and token revoke-all) also revoke permanent Full Admin credentials and persistent OAuth Full Admin grants. Revoking a single OAuth refresh session leaves the separate Full Admin grant in place, but the revoked session cannot authenticate.
+
+---
+
+## ☕ Buy me a coffee
+
+If you find this project useful, consider buying me a coffee to support its maintenance and development. Thank you!
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/lowji194/lowji194/main/assets/donate-qr.svg"><img src="https://raw.githubusercontent.com/lowji194/lowji194/main/assets/donate-qr.svg" width="300" alt="Donate — scan the QR code"></a>
+</p>
